@@ -51,8 +51,8 @@ jobs:
       - name: Compile sketch
         run: |
           set -e
-          # Compile the sketch in repository root. Adjust --fqbn for your board if needed.
-          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --build-path build .
+          # Compile the correct sketch file (sensorDHT11.ino)
+          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --build-path build sensorDHT11.ino
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
