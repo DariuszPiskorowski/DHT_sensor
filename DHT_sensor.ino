@@ -44,6 +44,11 @@ const unsigned long wifiCheckInterval = 60000;
 bool wifiConnecting = false;
 unsigned long wifiConnectStart = 0;
 const unsigned long wifiConnectTimeout = 30000;
+bool wifiScanInProgress = false;
+unsigned long wifiScanStart = 0;
+const unsigned long wifiScanTimeout = 15000;
+
+void handleWiFiScanResult(int networksFound);
 
 void setup() {
   Serial.begin(115200);
@@ -59,31 +64,48 @@ void setup() {
   dht22.begin();
 
   // Try to detect sensor type by sampling both handlers and applying heuristics
-  float h11 = dht11.readHumidity();
-  float t11 = dht11.readTemperature();
-  float h22 = dht22.readHumidity();
-  float t22 = dht22.readTemperature();
+  delay(2000); // DHT sensors often need time after begin()
+  float h11 = NAN, t11 = NAN, h22 = NAN, t22 = NAN;
+  int valid11Count = 0;
+  int valid22Count = 0;
+  bool frac22 = false;
+  const int detectSamples = 3;
+  const unsigned long detectDelayMs = 400;
 
-  bool valid11 = !isnan(h11) && !isnan(t11) && (h11 >= 0.0) && (h11 <= 100.0) && (t11 >= 0.0) && (t11 <= 60.0);
-  bool valid22 = !isnan(h22) && !isnan(t22) && (h22 >= 0.0) && (h22 <= 100.0) && (t22 >= -40.0) && (t22 <= 80.0);
+  for (int i = 0; i < detectSamples; ++i) {
+    h11 = dht11.readHumidity();
+    t11 = dht11.readTemperature();
+    h22 = dht22.readHumidity();
+    t22 = dht22.readTemperature();
 
-  if (valid22 && !valid11) {
+    bool valid11 = !isnan(h11) && !isnan(t11) && (h11 >= 0.0) && (h11 <= 100.0) && (t11 >= 0.0) && (t11 <= 60.0);
+    bool valid22 = !isnan(h22) && !isnan(t22) && (h22 >= 0.0) && (h22 <= 100.0) && (t22 >= -40.0) && (t22 <= 80.0);
+    if (valid11) valid11Count++;
+    if (valid22) {
+      valid22Count++;
+      if ((fabs(t22 - round(t22)) > 0.05) || (fabs(h22 - round(h22)) > 0.05)) {
+        frac22 = true;
+      }
+    }
+    delay(detectDelayMs);
+  }
+
+  if (valid22Count > 0 && valid11Count == 0) {
     dht = &dht22;
     sensorPresent = true;
     Serial.println("Sensor diagnostic: Detected DHT22");
-  } else if (valid11 && !valid22) {
+  } else if (valid11Count > 0 && valid22Count == 0) {
     dht = &dht11;
     sensorPresent = true;
     Serial.println("Sensor diagnostic: Detected DHT11");
-  } else if (valid22 && valid11) {
+  } else if (valid22Count > 0 && valid11Count > 0) {
     // Both returned plausible values; prefer DHT22 if fractional precision observed
-    bool frac22 = (fabs(t22 - round(t22)) > 0.05) || (fabs(h22 - round(h22)) > 0.05);
     if (frac22) {
       dht = &dht22;
-      Serial.println("Sensor diagnostic: Ambiguous — choosing DHT22 based on fractional data");
+      Serial.println("Sensor diagnostic: Ambiguous, choosing DHT22 based on fractional data");
     } else {
       dht = &dht11;
-      Serial.println("Sensor diagnostic: Ambiguous — choosing DHT11");
+      Serial.println("Sensor diagnostic: Ambiguous, choosing DHT11");
     }
     sensorPresent = true;
   } else {
@@ -116,6 +138,12 @@ void loop() {
       WiFi.disconnect();
       wifiConnecting = false;
     }
+  }
+
+  if (wifiScanInProgress && (currentMillis - wifiScanStart >= wifiScanTimeout)) {
+    Serial.println("WiFi scan timeout");
+    WiFi.scanDelete();
+    wifiScanInProgress = false;
   }
 
   if (!mqttClient.connected()) {
@@ -169,12 +197,14 @@ void reconnectToMQTT() {
     mqttClient.publish(willTopic, "ONLINE", true);
 
     // Publish IP address
-    String ipAddress = WiFi.localIP().toString();
+    IPAddress localIp = WiFi.localIP();
+    char ipAddress[16];
+    snprintf(ipAddress, sizeof(ipAddress), "%u.%u.%u.%u", localIp[0], localIp[1], localIp[2], localIp[3]);
     char ipTopic[64];
     snprintf(ipTopic, sizeof(ipTopic), "%s/IP/ipaddress", deviceName);
     Serial.print("Publishing IP to: ");
     Serial.println(ipTopic);
-    mqttClient.publish(ipTopic, ipAddress.c_str());
+    mqttClient.publish(ipTopic, ipAddress);
     // Publish connected SSID and RSSI
     char ssidTopic[64];
     snprintf(ssidTopic, sizeof(ssidTopic), "%s/WiFi/SSID", deviceName);
@@ -182,8 +212,9 @@ void reconnectToMQTT() {
 
     char rssiTopic[64];
     snprintf(rssiTopic, sizeof(rssiTopic), "%s/WiFi/RSSI", deviceName);
-    String rssiNow = String(WiFi.RSSI());
-    mqttClient.publish(rssiTopic, rssiNow.c_str());
+    char rssiNow[8];
+    snprintf(rssiNow, sizeof(rssiNow), "%ld", WiFi.RSSI());
+    mqttClient.publish(rssiTopic, rssiNow);
   } else {
     Serial.print("failed, rc=");
     Serial.println(mqttClient.state());
@@ -192,43 +223,61 @@ void reconnectToMQTT() {
 
 // Scan available networks and connect to the strongest one from the candidate list
 void connectToWiFi() {
-  Serial.println("Scanning for candidate WiFi networks...");
+  if (wifiScanInProgress) {
+    return;
+  }
+
+  Serial.println("Scanning for candidate WiFi networks (async)...");
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  wifiScanInProgress = true;
+  wifiScanStart = millis();
+  WiFi.scanNetworksAsync(handleWiFiScanResult, true);
+}
 
-  int n = WiFi.scanNetworks();
-  if (n <= 0) {
+void handleWiFiScanResult(int networksFound) {
+  wifiScanInProgress = false;
+
+  if (networksFound <= 0) {
     Serial.println("No networks found");
-  } else {
-    int bestRssi = -10000;
-    String bestSSID = "";
-    for (int i = 0; i < n; ++i) {
-      String found = WiFi.SSID(i);
-      int rssi = WiFi.RSSI(i);
-      for (int j = 0; j < candidateCount; ++j) {
-        if (found == String(candidateSSIDs[j])) {
-          Serial.print("Found candidate: "); Serial.print(found); Serial.print(" rssi="); Serial.println(rssi);
-          if (rssi > bestRssi) {
-            bestRssi = rssi;
-            bestSSID = found;
-          }
+    WiFi.scanDelete();
+    return;
+  }
+
+  int bestRssi = -10000;
+  String bestSSID = "";
+  for (int i = 0; i < networksFound; ++i) {
+    String found = WiFi.SSID(i);
+    int rssi = WiFi.RSSI(i);
+    for (int j = 0; j < candidateCount; ++j) {
+      if (found == String(candidateSSIDs[j])) {
+        Serial.print("Found candidate: "); Serial.print(found); Serial.print(" rssi="); Serial.println(rssi);
+        if (rssi > bestRssi) {
+          bestRssi = rssi;
+          bestSSID = found;
         }
       }
     }
+  }
 
-    if (bestSSID.length() > 0) {
-      Serial.print("Attempting to connect to best SSID: "); Serial.println(bestSSID);
-      WiFi.begin(bestSSID.c_str(), wifiPassword);
-      wifiConnecting = true;
-      wifiConnectStart = millis();
-    } else {
-      Serial.println("No candidate SSIDs found in scan");
-    }
+  if (bestSSID.length() > 0) {
+    Serial.print("Attempting to connect to best SSID: "); Serial.println(bestSSID);
+    WiFi.begin(bestSSID.c_str(), wifiPassword);
+    wifiConnecting = true;
+    wifiConnectStart = millis();
+  } else {
+    Serial.println("No candidate SSIDs found in scan");
   }
   WiFi.scanDelete();
 }
 
 void readAndSendSensorData(bool isRetry) {
+  if (!mqttClient.connected()) {
+    // Avoid publishing when MQTT is offline; schedule next read instead.
+    nextReadTime = millis() + readInterval;
+    return;
+  }
+
   // Always publish current SSID and RSSI so you can monitor connectivity even when DHT fails
   char ssidTopic[64];
   snprintf(ssidTopic, sizeof(ssidTopic), "%s/WiFi/SSID", deviceName);
@@ -237,8 +286,9 @@ void readAndSendSensorData(bool isRetry) {
 
   char rssiTopic[64];
   snprintf(rssiTopic, sizeof(rssiTopic), "%s/WiFi/RSSI", deviceName);
-  String rssi = String(WiFi.RSSI());
-  mqttClient.publish(rssiTopic, rssi.c_str());
+  char rssi[8];
+  snprintf(rssi, sizeof(rssi), "%ld", WiFi.RSSI());
+  mqttClient.publish(rssiTopic, rssi);
   Serial.print("Published RSSI: "); Serial.print(rssi); Serial.print(" -> "); Serial.println(rssiTopic);
 
   // Read sensor values (read humidity first as recommended)
