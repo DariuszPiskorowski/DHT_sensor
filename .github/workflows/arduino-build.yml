@@ -15,13 +15,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Arduino CLI
+      - name: Setup Arduino CLI (primary)
         uses: arduino/setup-arduino-cli@v1
         with:
           version: '1.4.0'
-      - name: Verify Arduino CLI
+        continue-on-error: true
+
+      - name: Ensure arduino-cli available (fallback installer)
         run: |
           set -e
+          if ! command -v arduino-cli >/dev/null 2>&1; then
+            echo "arduino-cli not found; running fallback installer"
+            curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b $HOME/.local/bin 1.4.0
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+          fi
           arduino-cli version
 
       - name: Update core index and install ESP8266 core
