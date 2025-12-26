@@ -24,11 +24,16 @@ jobs:
       - name: Ensure arduino-cli available (fallback installer)
         run: |
           set -e
+          # Fallback install if not present
           if ! command -v arduino-cli >/dev/null 2>&1; then
             echo "arduino-cli not found; running fallback installer"
             curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- 1.4.0 -b $HOME/.local/bin
-            echo "$HOME/.local/bin" >> $GITHUB_PATH
           fi
+          # Add all possible install locations to PATH and $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "/home/runner/work/DHT_sensor/DHT_sensor/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:/home/runner/work/DHT_sensor/DHT_sensor/bin:$PATH"
+          which arduino-cli || true
           arduino-cli version
 
       - name: Update core index and install ESP8266 core
