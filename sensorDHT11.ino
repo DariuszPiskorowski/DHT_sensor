@@ -10,12 +10,12 @@
 // WiFi configuration (hardcoded)
 const char* candidateSSIDs[] = {"eir-JPP", "JPP2", "JPPTV", "JPP1"};
 const int candidateCount = sizeof(candidateSSIDs) / sizeof(candidateSSIDs[0]);
-const char* wifiPassword = "faf804a3d766"; // wspólne hasło dla wszystkich sieci
+const char* wifiPassword = "**************"; // wspólne hasło dla wszystkich sieci
 
 // MQTT server details
-const char* mqtt_server = "192.168.1.109";
-const char* mqtt_user = "sonixh";
-const char* mqtt_password = "50Lar";
+const char* mqtt_server = "192.168.1.***";
+const char* mqtt_user = "s****h";
+const char* mqtt_password = "*****";
 
 // Device name (hardcoded)
 char deviceName[33];
