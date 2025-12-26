@@ -15,10 +15,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Arduino CLI
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+        with:
+          version: '1.4.0'
+      - name: Verify Arduino CLI
         run: |
           set -e
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
           arduino-cli version
 
       - name: Update core index and install ESP8266 core
