@@ -1,0 +1,14 @@
+# Arduino build files
+build/
+*.elf
+*.bin
+*.hex
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/

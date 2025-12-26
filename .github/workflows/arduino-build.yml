@@ -1,0 +1,47 @@
+name: Arduino CLI build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build sketch with Arduino CLI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        run: |
+          set -e
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          arduino-cli version
+
+      - name: Update core index and install ESP8266 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp8266:esp8266
+
+      - name: Install required libraries
+        run: |
+          arduino-cli lib install "PubSubClient"
+          arduino-cli lib install "DHT sensor library"
+
+      - name: Compile sketch
+        run: |
+          set -e
+          # Compile the sketch in repository root. Adjust --fqbn for your board if needed.
+          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --build-path build .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arduino-build
+          path: |
+            build/**/*.bin
+            build/**/*.elf
+            build/**/*.hex
