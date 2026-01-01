@@ -78,8 +78,8 @@ void setup() {
     h22 = dht22.readHumidity();
     t22 = dht22.readTemperature();
 
-    bool valid11 = !isnan(h11) && !isnan(t11) && (h11 >= 0.0) && (h11 <= 100.0) && (t11 >= 0.0) && (t11 <= 60.0);
-    bool valid22 = !isnan(h22) && !isnan(t22) && (h22 >= 0.0) && (h22 <= 100.0) && (t22 >= -40.0) && (t22 <= 80.0);
+    bool valid11 = !isnan(h11) && !isnan(t11) && (h11 >= 0.0) && (h11 <= 100.0) && (t11 >= 10.0) && (t11 <= 30.0);
+    bool valid22 = !isnan(h22) && !isnan(t22) && (h22 >= 0.0) && (h22 <= 100.0) && (t22 >= 10.0) && (t22 <= 30.0);
     if (valid11) valid11Count++;
     if (valid22) {
       valid22Count++;
@@ -121,7 +121,7 @@ void loop() {
 
   if (currentMillis - lastWiFiCheck >= wifiCheckInterval) {
     lastWiFiCheck = currentMillis;
-    if (WiFi.status() != WL_CONNECTED && !wifiConnecting) {
+    if (WiFi.status() != WL_CONNECTED && !wifiConnecting && !wifiScanInProgress) {
       Serial.println("WiFi watchdog: not connected, attempting reconnect...");
       connectToWiFi();
     }
@@ -177,15 +177,8 @@ void reconnectToMQTT() {
     return;
   }
 
-  // Resolve MQTT server hostname
-  IPAddress mqttServerIp;
-  if (!WiFi.hostByName(mqtt_server, mqttServerIp)) {
-    Serial.println("Failed to resolve MQTT server IP via WiFi.hostByName()");
-    return;
-  }
-  Serial.print("Resolved MQTT server IP: ");
-  Serial.println(mqttServerIp.toString());
-  mqttClient.setServer(mqttServerIp, 1883);
+  // Używamy bezpośrednio twardego adresu IP (bez DNS)
+  // mqttClient.setServer() już wykonane w setup() z mqtt_server
 
   char willTopic[64];
   snprintf(willTopic, sizeof(willTopic), "%s/Status", deviceName);
@@ -240,6 +233,13 @@ void handleWiFiScanResult(int networksFound) {
 
   if (networksFound <= 0) {
     Serial.println("No networks found");
+    WiFi.scanDelete();
+    return;
+  }
+
+  // Jeśli już jesteśmy połączeni, nie próbuj łączyć ponownie
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Already connected, skipping reconnection");
     WiFi.scanDelete();
     return;
   }
